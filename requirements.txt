@@ -1,0 +1,10 @@
+marimo
+pandas
+matplotlib
+numpy
+openpyxl
+requests
+pyarrow
+lxml
+altair
+vegafusion
