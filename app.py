@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.13.8"
-app = marimo.App(width="full")
+app = marimo.App(width="full", app_title="OSINERGMIN")
 
 
 @app.cell(hide_code=True)
@@ -743,6 +743,101 @@ def _(danger_data, danger_graph, download_3, io, mo):
                 label = "Descargar Excel"
             )
             mo.output.append(_excel_download)
+    return
+
+
+@app.cell
+def _(alt, matriz, mo, pd):
+    _data = matriz[[
+        "CODIGO OSINERGMIN", 
+        "TANQUE",
+        "CAPACIDAD (GLN)",
+        "RESULTADO DE COMPARTIMIENTO", 
+        "EDAD DEL TANQUE"
+    ]].copy()
+    _data = _data[
+        _data["RESULTADO DE COMPARTIMIENTO"].notna() & 
+        (_data["RESULTADO DE COMPARTIMIENTO"].str.strip() != "") &
+        _data["EDAD DEL TANQUE"].notna() & 
+        (_data["EDAD DEL TANQUE"].str.strip() != "") &
+        (_data["EDAD DEL TANQUE"] != "NO APLICA")
+    ].reset_index(drop = True)
+    _datos = []
+    _codes = _data["CODIGO OSINERGMIN"].unique()
+    for _i in _codes:
+        _data_code = _data[_data["CODIGO OSINERGMIN"] == _i]
+        _tanks = _data_code["TANQUE"].unique()
+        for j in _tanks:
+            _data_tank = _data_code[_data_code["TANQUE"] == j]
+            if (_data_tank['RESULTADO DE COMPARTIMIENTO'] == 'SIN FUGA').all():
+                _result = "HERMETICO"
+            else:
+                _result = "NO HERMETICO"
+            _datos.append(list(_data_tank.values[0]) + [_result, _data_tank["CAPACIDAD (GLN)"].sum()])
+    _datos = pd.DataFrame(_datos, columns = [
+        "CODIGO OSINERGMIN",  
+        "TANQUE",
+        "CAPACIDAD (GLN)",
+        "RESULTADO DE COMPARTIMIENTO", 
+        "EDAD DEL TANQUE",
+        "RESULTADO",
+        "CAPACIDAD DEL TANQUE (GLN)"
+    ]).drop(columns = ["CAPACIDAD (GLN)", "RESULTADO DE COMPARTIMIENTO"])
+    _datos = _datos[_datos["EDAD DEL TANQUE"] < 100]
+
+    _hermeticos = alt.Chart(_datos[_datos["RESULTADO"] == "HERMETICO"]).mark_circle(
+        size=50,
+        stroke='black',
+        strokeWidth=0.5
+    ).encode(
+        x=alt.X("EDAD DEL TANQUE:Q", title="AÑOS DE ANTIGUEDAD DEL TANQUE"),
+        y=alt.Y("CAPACIDAD DEL TANQUE (GLN):Q", title="CAPACIDAD DEL TANQUE (GLN)"),
+        color=alt.value("blue"),
+        tooltip=[
+            "CODIGO OSINERGMIN", "TANQUE", "CAPACIDAD DEL TANQUE (GLN)", "EDAD DEL TANQUE", "RESULTADO"
+        ]
+    )
+    _no_hermeticos = alt.Chart(_datos[_datos["RESULTADO"] == "NO HERMETICO"]).mark_circle(
+        size=50,
+        stroke='black',
+        strokeWidth=0.5
+    ).encode(
+        x="EDAD DEL TANQUE:Q",
+        y="CAPACIDAD DEL TANQUE (GLN):Q",
+        color=alt.value("red"),
+        tooltip=[
+            "CODIGO OSINERGMIN", "TANQUE", "CAPACIDAD DEL TANQUE (GLN)", "EDAD DEL TANQUE", "RESULTADO"
+        ]
+    )
+    _chart = alt.layer(_hermeticos, _no_hermeticos).resolve_scale(
+        color='independent'
+    ).properties(
+        title="RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION A SU HERMETICIDAD",
+    )
+    mo.output.append(mo.md("<br>"))
+    mo.output.append(mo.ui.altair_chart(_chart))
+
+    # _chart = alt.Chart(_datos).mark_circle(size = 50, stroke='black', strokeWidth=0.5).encode(
+    #     x=alt.X("EDAD DEL TANQUE:Q", title="AÑOS DE ANTIGUEDAD DEL TANQUE"),
+    #     y=alt.Y("CAPACIDAD DEL TANQUE (GLN):Q", title="CAPACIDAD DEL TANQUE (GLN)"),
+    #     color=alt.Color("RESULTADO:N", title="RESULTADO",
+    #                        scale=alt.Scale(
+    #                             domain=["NO HERMETICO", "HERMETICO"],
+    #                             range=["red", "blue"]
+    #                        )
+    #                    ),
+    #     tooltip=[
+    #         "CODIGO OSINERGMIN",
+    #         "TANQUE",
+    #         "CAPACIDAD DEL TANQUE (GLN)",
+    #         "EDAD DEL TANQUE",
+    #         "RESULTADO"
+    #     ]
+    # ).properties(
+    #     title="RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION A SU HERMETICIDAD",
+    # )
+    # mo.output.append(mo.md("<br>"))
+    # mo.output.append(mo.ui.altair_chart(_chart))
     return
 
 
