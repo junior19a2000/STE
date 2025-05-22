@@ -649,7 +649,7 @@ def _(fechas_limite, matriz, mo, outofdate, regiones_outofdate, result):
                             value = "NULA",
                             label = "ESTADO: ",
                             full_width = True)
-    matrix = matriz[matriz["OFICINA REGIONAL"].isin(regiones_outofdate(fechas_limite))].copy() if outofdate.value else matriz
+    matrix = matriz[matriz["OFICINA REGIONAL"].isin(regiones_outofdate(fechas_limite))].copy() if outofdate.value else matriz.copy()
     mo.output.append(mo.hstack([region, analisis, estado], widths = [1, 1, 1, 1], gap = 2))
     return analisis, estado, matrix, region
 
@@ -688,6 +688,120 @@ def _(
                 label = "Descargar Excel"
             )
             mo.output.append(_excel_download)
+    return
+
+
+@app.cell
+def _(Texto, mo):
+    mo.output.append(mo.md("<br>"))
+    optional_1 = mo.ui.switch(label = "Todas las regiones")
+    _texto = "ANALISIS CORRELACIONAL"
+    mo.output.append(mo.hstack([Texto(_texto, 26, "left", "bold").create(), optional_1], justify = "space-between", align = "stretch"))
+    _texto = "La siguiente grafica, representa la relacion entre la edad del tanque y su capacidad:"
+    mo.output.append(Texto(_texto, 16, "justify", "normal").create())
+    return (optional_1,)
+
+
+@app.cell
+def _(alt, matrix, matriz, mo, optional_1, outofdate, pd, region):
+    if optional_1.value:
+        _data_filter = matrix if outofdate.value else matriz.copy()
+    else:
+        _data_filter = matriz[matriz["OFICINA REGIONAL"] == region.value].copy()
+    _regiones = str(sorted(_data_filter["OFICINA REGIONAL"].unique().tolist()))
+    _data = _data_filter[[
+        "CODIGO OSINERGMIN", 
+        "TANQUE",
+        "CAPACIDAD (GLN)",
+        "RESULTADO DE COMPARTIMIENTO", 
+        "EDAD DEL TANQUE"
+    ]].copy().reset_index(drop = True)
+    _data = _data[
+        _data["RESULTADO DE COMPARTIMIENTO"].notna() & 
+        (_data["RESULTADO DE COMPARTIMIENTO"].str.strip() != "") &
+        _data["EDAD DEL TANQUE"].notna() & 
+        (_data["EDAD DEL TANQUE"].str.strip() != "") &
+        (_data["EDAD DEL TANQUE"] != "NO APLICA")
+    ].reset_index(drop = True)
+    _datos = []
+    _codes = _data["CODIGO OSINERGMIN"].unique()
+    for _i in _codes:
+        _data_code = _data[_data["CODIGO OSINERGMIN"] == _i]
+        _tanks = _data_code["TANQUE"].unique()
+        for j in _tanks:
+            _data_tank = _data_code[_data_code["TANQUE"] == j]
+            if (_data_tank['RESULTADO DE COMPARTIMIENTO'] == 'SIN FUGA').all():
+                _result = "HERMETICO"
+            else:
+                _result = "NO HERMETICO"
+            _datos.append(list(_data_tank.values[0]) + [_result, _data_tank["CAPACIDAD (GLN)"].sum()])
+    _datos = pd.DataFrame(_datos, columns = [
+        "CODIGO OSINERGMIN",  
+        "TANQUE",
+        "CAPACIDAD (GLN)",
+        "RESULTADO DE COMPARTIMIENTO", 
+        "EDAD DEL TANQUE",
+        "RESULTADO",
+        "CAPACIDAD DEL TANQUE (GLN)"
+    ]).drop(columns = ["CAPACIDAD (GLN)", "RESULTADO DE COMPARTIMIENTO"])
+    _datos = _datos[_datos["EDAD DEL TANQUE"] < 100]
+
+    _hermeticos = alt.Chart(_datos[_datos["RESULTADO"] == "HERMETICO"]).mark_circle(
+        size=50,
+        stroke='black',
+        strokeWidth=0.5
+    ).encode(
+        x=alt.X("EDAD DEL TANQUE:Q", title="AÑOS DE ANTIGUEDAD DEL TANQUE"),
+        y=alt.Y("CAPACIDAD DEL TANQUE (GLN):Q", title="CAPACIDAD DEL TANQUE (GLN)"),
+        color=alt.value("blue"),
+        tooltip=[
+            "CODIGO OSINERGMIN", "TANQUE", "CAPACIDAD DEL TANQUE (GLN)", "EDAD DEL TANQUE", "RESULTADO"
+        ]
+    )
+    _no_hermeticos = alt.Chart(_datos[_datos["RESULTADO"] == "NO HERMETICO"]).mark_circle(
+        size=50,
+        stroke='black',
+        strokeWidth=0.5
+    ).encode(
+        x="EDAD DEL TANQUE:Q",
+        y="CAPACIDAD DEL TANQUE (GLN):Q",
+        color=alt.value("red"),
+        tooltip=[
+            "CODIGO OSINERGMIN", "TANQUE", "CAPACIDAD DEL TANQUE (GLN)", "EDAD DEL TANQUE", "RESULTADO"
+        ]
+    )
+    _chart = alt.layer(_hermeticos, _no_hermeticos).resolve_scale(
+        color='independent'
+    ).properties(
+        title={
+            "text":"RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION A SU HERMETICIDAD",
+            "subtitle": _regiones,
+            "subtitleFontSize": 5,
+        },
+    )
+    mo.output.append(mo.ui.altair_chart(_chart))
+
+    # _chart = alt.Chart(_datos).mark_circle(size = 50, stroke='black', strokeWidth=0.5).encode(
+    #     x=alt.X("EDAD DEL TANQUE:Q", title="AÑOS DE ANTIGUEDAD DEL TANQUE"),
+    #     y=alt.Y("CAPACIDAD DEL TANQUE (GLN):Q", title="CAPACIDAD DEL TANQUE (GLN)"),
+    #     color=alt.Color("RESULTADO:N", title="RESULTADO",
+    #                        scale=alt.Scale(
+    #                             domain=["NO HERMETICO", "HERMETICO"],
+    #                             range=["red", "blue"]
+    #                        )
+    #                    ),
+    #     tooltip=[
+    #         "CODIGO OSINERGMIN",
+    #         "TANQUE",
+    #         "CAPACIDAD DEL TANQUE (GLN)",
+    #         "EDAD DEL TANQUE",
+    #         "RESULTADO"
+    #     ]
+    # ).properties(
+    #     title="RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION A SU HERMETICIDAD",
+    # )
+    # correlacional_graph = mo.ui.altair_chart(_chart)
+    # mo.output.append(correlacional_graph)
     return
 
 
@@ -747,97 +861,10 @@ def _(danger_data, danger_graph, download_3, io, mo):
 
 
 @app.cell
-def _(alt, matriz, mo, pd):
-    _data = matriz[[
-        "CODIGO OSINERGMIN", 
-        "TANQUE",
-        "CAPACIDAD (GLN)",
-        "RESULTADO DE COMPARTIMIENTO", 
-        "EDAD DEL TANQUE"
-    ]].copy()
-    _data = _data[
-        _data["RESULTADO DE COMPARTIMIENTO"].notna() & 
-        (_data["RESULTADO DE COMPARTIMIENTO"].str.strip() != "") &
-        _data["EDAD DEL TANQUE"].notna() & 
-        (_data["EDAD DEL TANQUE"].str.strip() != "") &
-        (_data["EDAD DEL TANQUE"] != "NO APLICA")
-    ].reset_index(drop = True)
-    _datos = []
-    _codes = _data["CODIGO OSINERGMIN"].unique()
-    for _i in _codes:
-        _data_code = _data[_data["CODIGO OSINERGMIN"] == _i]
-        _tanks = _data_code["TANQUE"].unique()
-        for j in _tanks:
-            _data_tank = _data_code[_data_code["TANQUE"] == j]
-            if (_data_tank['RESULTADO DE COMPARTIMIENTO'] == 'SIN FUGA').all():
-                _result = "HERMETICO"
-            else:
-                _result = "NO HERMETICO"
-            _datos.append(list(_data_tank.values[0]) + [_result, _data_tank["CAPACIDAD (GLN)"].sum()])
-    _datos = pd.DataFrame(_datos, columns = [
-        "CODIGO OSINERGMIN",  
-        "TANQUE",
-        "CAPACIDAD (GLN)",
-        "RESULTADO DE COMPARTIMIENTO", 
-        "EDAD DEL TANQUE",
-        "RESULTADO",
-        "CAPACIDAD DEL TANQUE (GLN)"
-    ]).drop(columns = ["CAPACIDAD (GLN)", "RESULTADO DE COMPARTIMIENTO"])
-    _datos = _datos[_datos["EDAD DEL TANQUE"] < 100]
-
-    _hermeticos = alt.Chart(_datos[_datos["RESULTADO"] == "HERMETICO"]).mark_circle(
-        size=50,
-        stroke='black',
-        strokeWidth=0.5
-    ).encode(
-        x=alt.X("EDAD DEL TANQUE:Q", title="AÑOS DE ANTIGUEDAD DEL TANQUE"),
-        y=alt.Y("CAPACIDAD DEL TANQUE (GLN):Q", title="CAPACIDAD DEL TANQUE (GLN)"),
-        color=alt.value("blue"),
-        tooltip=[
-            "CODIGO OSINERGMIN", "TANQUE", "CAPACIDAD DEL TANQUE (GLN)", "EDAD DEL TANQUE", "RESULTADO"
-        ]
-    )
-    _no_hermeticos = alt.Chart(_datos[_datos["RESULTADO"] == "NO HERMETICO"]).mark_circle(
-        size=50,
-        stroke='black',
-        strokeWidth=0.5
-    ).encode(
-        x="EDAD DEL TANQUE:Q",
-        y="CAPACIDAD DEL TANQUE (GLN):Q",
-        color=alt.value("red"),
-        tooltip=[
-            "CODIGO OSINERGMIN", "TANQUE", "CAPACIDAD DEL TANQUE (GLN)", "EDAD DEL TANQUE", "RESULTADO"
-        ]
-    )
-    _chart = alt.layer(_hermeticos, _no_hermeticos).resolve_scale(
-        color='independent'
-    ).properties(
-        title="RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION A SU HERMETICIDAD",
-    )
+def _(Texto, mo):
     mo.output.append(mo.md("<br>"))
-    mo.output.append(mo.ui.altair_chart(_chart))
-
-    # _chart = alt.Chart(_datos).mark_circle(size = 50, stroke='black', strokeWidth=0.5).encode(
-    #     x=alt.X("EDAD DEL TANQUE:Q", title="AÑOS DE ANTIGUEDAD DEL TANQUE"),
-    #     y=alt.Y("CAPACIDAD DEL TANQUE (GLN):Q", title="CAPACIDAD DEL TANQUE (GLN)"),
-    #     color=alt.Color("RESULTADO:N", title="RESULTADO",
-    #                        scale=alt.Scale(
-    #                             domain=["NO HERMETICO", "HERMETICO"],
-    #                             range=["red", "blue"]
-    #                        )
-    #                    ),
-    #     tooltip=[
-    #         "CODIGO OSINERGMIN",
-    #         "TANQUE",
-    #         "CAPACIDAD DEL TANQUE (GLN)",
-    #         "EDAD DEL TANQUE",
-    #         "RESULTADO"
-    #     ]
-    # ).properties(
-    #     title="RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION A SU HERMETICIDAD",
-    # )
-    # mo.output.append(mo.md("<br>"))
-    # mo.output.append(mo.ui.altair_chart(_chart))
+    mo.output.append(mo.md("---"))
+    mo.output.append(mo.hstack([Texto("Documentacion del proyecto en: ", 12, "center", "normal").create(), mo.md("[![DeepWiki](https://img.shields.io/badge/DeepWiki-junior19a2000%2FSTE-blue.svg?logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAyCAYAAAAnWDnqAAAAAXNSR0IArs4c6QAAA05JREFUaEPtmUtyEzEQhtWTQyQLHNak2AB7ZnyXZMEjXMGeK/AIi+QuHrMnbChYY7MIh8g01fJoopFb0uhhEqqcbWTp06/uv1saEDv4O3n3dV60RfP947Mm9/SQc0ICFQgzfc4CYZoTPAswgSJCCUJUnAAoRHOAUOcATwbmVLWdGoH//PB8mnKqScAhsD0kYP3j/Yt5LPQe2KvcXmGvRHcDnpxfL2zOYJ1mFwrryWTz0advv1Ut4CJgf5uhDuDj5eUcAUoahrdY/56ebRWeraTjMt/00Sh3UDtjgHtQNHwcRGOC98BJEAEymycmYcWwOprTgcB6VZ5JK5TAJ+fXGLBm3FDAmn6oPPjR4rKCAoJCal2eAiQp2x0vxTPB3ALO2CRkwmDy5WohzBDwSEFKRwPbknEggCPB/imwrycgxX2NzoMCHhPkDwqYMr9tRcP5qNrMZHkVnOjRMWwLCcr8ohBVb1OMjxLwGCvjTikrsBOiA6fNyCrm8V1rP93iVPpwaE+gO0SsWmPiXB+jikdf6SizrT5qKasx5j8ABbHpFTx+vFXp9EnYQmLx02h1QTTrl6eDqxLnGjporxl3NL3agEvXdT0WmEost648sQOYAeJS9Q7bfUVoMGnjo4AZdUMQku50McDcMWcBPvr0SzbTAFDfvJqwLzgxwATnCgnp4wDl6Aa+Ax283gghmj+vj7feE2KBBRMW3FzOpLOADl0Isb5587h/U4gGvkt5v60Z1VLG8BhYjbzRwyQZemwAd6cCR5/XFWLYZRIMpX39AR0tjaGGiGzLVyhse5C9RKC6ai42ppWPKiBagOvaYk8lO7DajerabOZP46Lby5wKjw1HCRx7p9sVMOWGzb/vA1hwiWc6jm3MvQDTogQkiqIhJV0nBQBTU+3okKCFDy9WwferkHjtxib7t3xIUQtHxnIwtx4mpg26/HfwVNVDb4oI9RHmx5WGelRVlrtiw43zboCLaxv46AZeB3IlTkwouebTr1y2NjSpHz68WNFjHvupy3q8TFn3Hos2IAk4Ju5dCo8B3wP7VPr/FGaKiG+T+v+TQqIrOqMTL1VdWV1DdmcbO8KXBz6esmYWYKPwDL5b5FA1a0hwapHiom0r/cKaoqr+27/XcrS5UwSMbQAAAABJRU5ErkJggg==)](https://deepwiki.com/junior19a2000/STE)")], justify = "center", align = "center"))
     return
 
 
