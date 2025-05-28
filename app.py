@@ -382,9 +382,11 @@ def _(
     def registro_hermeticidad(data):
         datos = []
         codes = data["CODIGO OSINERGMIN"].unique()
-        for i in codes:
-            code_data = data[data["CODIGO OSINERGMIN"] == i]
-            datos.append([i, code_data["OFICINA REGIONAL"].iloc[0], registro(code_data), hermeticidad(code_data)])
+        with mo.status.progress_bar(total = len(codes), title = "Validando registro y hermeticidad", completion_title = "Validación finalizada", completion_subtitle = str(len(codes)) + " codigos validados", remove_on_exit = True) as bar:
+            for i in codes:
+                code_data = data[data["CODIGO OSINERGMIN"] == i]
+                datos.append([i, code_data["OFICINA REGIONAL"].iloc[0], registro(code_data), hermeticidad(code_data)])
+                bar.update(subtitle = "codigo: " + str(i))
         return pd.DataFrame(datos, columns = ["CODIGO OSINERGMIN", "OFICINA REGIONAL", "REGISTRO DE INFORMACION", "PRUEBAS DE HERMETICIDAD"])
 
     @mo.cache
@@ -414,11 +416,13 @@ def _(
         columns = ["CODIGO OSINERGMIN", "REGISTRO", "RUC", "RAZON SOCIAL", "DEPARTAMENTO", "PROVINCIA", "DISTRITO", "DIRECCION OPERATIVA"] + ["TANQUE " + str(i) for i in range(1, 16)] + ["CAP.TOTAL CL (gln)", "ACTIVIDAD"]
         activities = ["050 - ESTACION DE SERVICIOS / GRIFOS", "056 - ESTACION DE SERVICIO CON GASOCENTRO DE GLP", "106 - ESTACION DE SERVICIOS CON ESTABLECIMIENTO DE VENTA DE GNV", "107 - ESTACION DE SERVICIO CON GASOCENTRO DE GLP Y ESTABLECIMIENTO DE VENTA DE GNV"]
         data1 = []
-        for i in range(4):
-            response = requests.get(urls[i])
-            data0 = pd.read_html(BytesIO(response.content))[0]
-            data0["ACTIVIDAD"] = activities[i]
-            data1.append(data0.reindex(columns = columns))
+        with mo.status.progress_bar(total = 4, title = "Descargando información web", completion_title = "Información web descargada", completion_subtitle = str(4) + " descargas en total", remove_on_exit = True) as bar:
+            for i in range(4):
+                response = requests.get(urls[i])
+                data0 = pd.read_html(BytesIO(response.content))[0]
+                data0["ACTIVIDAD"] = activities[i]
+                data1.append(data0.reindex(columns = columns))
+                bar.update(subtitle = "actividad " + activities[i].split("-")[0].strip())
         data1 = pd.concat(data1, ignore_index = True)
         data1["CODIGO OSINERGMIN"] = data1["CODIGO OSINERGMIN"].str[2:-1]
         data1 = cleaner(data1, code_title, record_title)
@@ -428,8 +432,10 @@ def _(
     @mo.cache
     def load_matrix(data_url, data_tank, data_test):
         data = []
-        for _, _i in data_url.iterrows():
-            replicate(_i, data, data_tank, data_test)
+        with mo.status.progress_bar(total = data_url.shape[0], title = "Generando matriz", completion_title = "Matriz generada", completion_subtitle = str(data_url.shape[0]) + " submatrices en total", remove_on_exit = True) as bar:
+            for _, _i in data_url.iterrows():
+                replicate(_i, data, data_tank, data_test)
+                bar.update(subtitle = "codigo: " + str(_i.loc["CODIGO OSINERGMIN"]))    
         data = pd.DataFrame(data, columns = ["CODIGO OSINERGMIN", "REGISTRO", "RUC", "RAZON SOCIAL", "DEPARTAMENTO", "PROVINCIA", "DISTRITO", "DIRECCION OPERATIVA", "OFICINA REGIONAL", "ACTIVIDAD", "MATERIAL DEL TANQUE", "UBICACIÓN DEL TANQUE", "FECHA DE FABRICACION", "CAPACIDAD TOTAL DE CL (GLN)", "TANQUE", "COMPARTIMIENTO", "CAPACIDAD (GLN)", "PRODUCTO", "ESTADO DE SOLICITUD", "FECHA DE PRUEBA", "RESULTADO DE COMPARTIMIENTO", "RESULTADO DE TUBERÍA", "RESULTADO FINAL", "CERTIFICADO", "ORGANISMO DE INSPECCION"])
         data["CODIGO OSINERGMIN"] = data["CODIGO OSINERGMIN"].astype(int)
         data["CAPACIDAD (GLN)"] = data["CAPACIDAD (GLN)"].astype(float)
@@ -488,33 +494,35 @@ def _(
         columns = ["CODIGO OSINERGMIN", "REGISTRO", "RUC", "RAZON SOCIAL", "DEPARTAMENTO", "PROVINCIA", "DISTRITO", "DIRECCION OPERATIVA", "OFICINA REGIONAL", "ACTIVIDAD", "MATERIAL DEL TANQUE", "UBICACIÓN DEL TANQUE", "FECHA DE FABRICACION", "CAPACIDAD TOTAL DE CL (GLN)", "TANQUE", "COMPARTIMIENTO", "CAPACIDAD (GLN)", "PRODUCTO", "ESTADO DE SOLICITUD", "FECHA DE PRUEBA", "RESULTADO DE COMPARTIMIENTO", "RESULTADO DE TUBERÍA", "RESULTADO FINAL", "CERTIFICADO", "ORGANISMO DE INSPECCION"]
         codes = list(set(data_tests["CÓDIGO OSINERGMIN"]) - set(matrix["CODIGO OSINERGMIN"]))
         data = []
-        for code in codes:
-            df = data_tests[data_tests["CÓDIGO OSINERGMIN"] == code].copy()
-            df["FECHA FIN"] = pd.to_datetime(df["FECHA FIN"], format='%d-%m-%Y', errors = "coerce").dt.date
-            fila = df.iloc[0]
-            record = fila["REGISTRO DE HIDROCARBURO"]
-            departamento, provincia, distrito = fila["DEPARTAMENTO":"DISTRITO"].tolist()
-            code_fixed = [fila["CÓDIGO OSINERGMIN"], record, "", fila["RAZÓN SOCIAL"], departamento, provincia, distrito, fila["DIRECCIÓN OPERATIVA"], obtener_region(departamento, provincia, distrito), activity(record)]
-            fd = data_tanks[data_tanks["CODIGO_OSINERGMIN"] == code]
-            available_tanks = sorted(df["TANQUE NRO"].unique().tolist())
-            dato = []
-            for i in available_tanks:
-                df1 = df[df["TANQUE NRO"] == i]
-                if not fd.empty:
-                    data_tank = fd[fd["NUMERO_TANQUE"] == i]
-                    if not data_tank.empty:
-                        month, year, location, material = data_tank[["MES_FABRICACION", "ANIO_FABRICACION", "TIPO_INSTALACION", "MATERIAL"]].fillna("").values[0]
-                        date = dateofmade(month, year) if month and year else ""
+        with mo.status.progress_bar(total = len(codes), title = "Generando matriz complementaria", completion_title = "Matriz complementaria generada", completion_subtitle = str(len(codes)) + " submatrices en total", remove_on_exit = True) as bar:
+            for code in codes:
+                df = data_tests[data_tests["CÓDIGO OSINERGMIN"] == code].copy()
+                df["FECHA FIN"] = pd.to_datetime(df["FECHA FIN"], format='%d-%m-%Y', errors = "coerce").dt.date
+                fila = df.iloc[0]
+                record = fila["REGISTRO DE HIDROCARBURO"]
+                departamento, provincia, distrito = fila["DEPARTAMENTO":"DISTRITO"].tolist()
+                code_fixed = [fila["CÓDIGO OSINERGMIN"], record, "", fila["RAZÓN SOCIAL"], departamento, provincia, distrito, fila["DIRECCIÓN OPERATIVA"], obtener_region(departamento, provincia, distrito), activity(record)]
+                fd = data_tanks[data_tanks["CODIGO_OSINERGMIN"] == code]
+                available_tanks = sorted(df["TANQUE NRO"].unique().tolist())
+                dato = []
+                for i in available_tanks:
+                    df1 = df[df["TANQUE NRO"] == i]
+                    if not fd.empty:
+                        data_tank = fd[fd["NUMERO_TANQUE"] == i]
+                        if not data_tank.empty:
+                            month, year, location, material = data_tank[["MES_FABRICACION", "ANIO_FABRICACION", "TIPO_INSTALACION", "MATERIAL"]].fillna("").values[0]
+                            date = dateofmade(month, year) if month and year else ""
+                        else:
+                            location = material = date = ""
+                        tank_fixed = [material.upper(), location.upper(), date]
                     else:
-                        location = material = date = ""
-                    tank_fixed = [material.upper(), location.upper(), date]
-                else:
-                    tank_fixed = [""] * 3
-                available_slots = sorted(df1["NRO COMPARTIMIENTO"].unique().tolist())
-                for j in available_slots:
-                    df2 = df1[df1["NRO COMPARTIMIENTO"] == j].sort_values(by = ["FECHA FIN"], na_position = "first").drop_duplicates(subset = ["NRO COMPARTIMIENTO"], keep = "last")
-                    row = df2.iloc[0]
-                    dato.append(code_fixed + tank_fixed + ["", i, j, row["CAPACIDAD DE COMPARTIMIENTO"], row["PRODUCTO"], row["ESTADO SOLICITUD"], row["FECHA FIN"], row["RESULTADO DE COMPARTIMIENTO"], row["RESULTADO DE TUBERÍA"], row["RESULTADO"], row["NRO DE CERTIFICADO"], row["ORGANISMO DE INSPECCIÓN"]])
+                        tank_fixed = [""] * 3
+                    available_slots = sorted(df1["NRO COMPARTIMIENTO"].unique().tolist())
+                    for j in available_slots:
+                        df2 = df1[df1["NRO COMPARTIMIENTO"] == j].sort_values(by = ["FECHA FIN"], na_position = "first").drop_duplicates(subset = ["NRO COMPARTIMIENTO"], keep = "last")
+                        row = df2.iloc[0]
+                        dato.append(code_fixed + tank_fixed + ["", i, j, row["CAPACIDAD DE COMPARTIMIENTO"], row["PRODUCTO"], row["ESTADO SOLICITUD"], row["FECHA FIN"], row["RESULTADO DE COMPARTIMIENTO"], row["RESULTADO DE TUBERÍA"], row["RESULTADO"], row["NRO DE CERTIFICADO"], row["ORGANISMO DE INSPECCIÓN"]])
+                bar.update(subtitle = "codigo: " + str(code))
             dato = pd.DataFrame(dato, columns = columns)
             dato["CAPACIDAD TOTAL DE CL (GLN)"] = dato["CAPACIDAD (GLN)"].sum()
             data.append(dato)
@@ -626,6 +634,8 @@ def _(Texto, mo):
     _texto = "MATRIZ GENERAL DE DATOS ACTUALIZADA"
     download_2 = mo.ui.switch(label = "Exportar matriz general de datos")
     mo.output.append(mo.hstack([Texto(_texto, 26, "left", "bold").create(), download_2], justify = "space-between", align = "stretch"))
+    _texto = "Esta matriz contiene el consolidado general de información sobre los establecimientos registrados a nivel nacional. Incluye datos clave como el código OSINERGMIN, la razón social, su ubicación geográfica y los resultados de registro de información y pruebas de hermeticidad, que sirven como base para todos los análisis temáticos presentados en esta herramienta. La información se actualiza diariamente y es fundamental para planificar acciones de supervisión y facilitar el seguimiento del registro de información y pruebas de hermeticidad de los agentes a nivel nacional o regional."
+    mo.output.append(Texto(_texto, 16, "justify", "normal").create())
     return (download_2,)
 
 
@@ -642,12 +652,12 @@ def _(
         _data_tanks = load_tanksdata("DATA TANQUES.xlsx", "Exportar Hoja de Trabajo")
     with mo.status.spinner(title = 'Cargando datos', subtitle = 'de pruebas de hermeticidad ejecutadas a nivel nacional', remove_on_exit = True) as _spinner:
         _data_tests = load_testsdata("DATA PRUEBAS.xlsx", "PH - PRUEBAS HERMETICIDAD")
-    with mo.status.spinner(title = 'Cargando datos', subtitle = 'de agentes habilitados a nivel nacional', remove_on_exit = True) as _spinner:
-        _data_urls = load_urlsdata("CODIGO OSINERGMIN", "REGISTRO")
-    with mo.status.spinner(title = 'Consolidando datos', subtitle = 'y generando matriz de datos', remove_on_exit = True) as _spinner:
-        matriz = load_matrix(_data_urls, _data_tanks, _data_tests)
-    with mo.status.spinner(title = 'Filtrando agentes que acreditaron', subtitle = 'registro de informacion y hermeticidad', remove_on_exit = True) as _spinner:
-        result = registro_hermeticidad(matriz)
+    # with mo.status.spinner(title = 'Cargando datos', subtitle = 'de agentes habilitados a nivel nacional', remove_on_exit = True) as _spinner:
+    _data_urls = load_urlsdata("CODIGO OSINERGMIN", "REGISTRO")
+    # with mo.status.spinner(title = 'Consolidando datos', subtitle = 'y generando matriz de datos', remove_on_exit = True) as _spinner:
+    matriz = load_matrix(_data_urls, _data_tanks, _data_tests)
+    # with mo.status.spinner(title = 'Filtrando agentes que acreditaron', subtitle = 'registro de informacion y hermeticidad', remove_on_exit = True) as _spinner:
+    result = registro_hermeticidad(matriz)
     mo.output.replace(matriz)
     return matriz, result
 
@@ -711,6 +721,8 @@ def _(Texto, alt, intervalos, matriz, mo, pd):
     mo.output.append(mo.md("<br>"))
     _texto = "MAPAS DE CALOR PARA TANQUES HERMETICOS Y NO HERMETICOS A NIVEL NACIONAL"
     mo.output.append(Texto(_texto, 26, "left", "bold").create())
+    _texto = "Los mapas de calor muestran la distribución de tanques herméticos y no herméticos en función de su antigüedad y capacidad. Cada celda representa la cantidad de tanques que pertenecen a un rango específico de edad y capacidad, lo que permite identificar concentraciones, tendencias y posibles zonas de riesgo a nivel nacional. Los rangos han sido agrupados en intervalos regulares y visualizados mediante escalas de color, donde un tono más intenso indica una mayor concentración de tanques en ese grupo."
+    mo.output.append(Texto(_texto, 16, "justify", "normal").create())
 
     _data = matriz[[
         "CODIGO OSINERGMIN", 
@@ -807,6 +819,8 @@ def _(Texto, mo):
     outofdate = mo.ui.switch(value = True, label = "Analizar solo a los que estan fuera del plazo correspondiente")
     modificate = mo.ui.switch(label = "Para oficios")
     mo.output.append(mo.hstack([Texto(_texto, 26, "left", "bold").create(), outofdate, modificate, download_1], justify = "space-between", align = "stretch"))
+    _texto = "Esta sección permite realizar un análisis detallado del estado de los tanques por oficina regional. A través de los filtros disponibles, es posible identificar establecimientos que presentan observaciones relacionadas con la hermeticidad de tanques, verificar si están dentro o fuera del plazo reglamentario, y obtener información precisa por ubicación geográfica y razón social. Los resultados pueden ser exportados para su seguimiento, generación de oficios o elaboración de informes específicos por oficina regional."
+    mo.output.append(Texto(_texto, 16, "justify", "normal").create())
     return download_1, modificate, outofdate
 
 
