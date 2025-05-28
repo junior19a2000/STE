@@ -1,10 +1,11 @@
-marimo
-pandas
-matplotlib
-numpy
-openpyxl
-requests
-pyarrow
-lxml
-altair
-vegafusion
+marimo == 0.13.8
+pandas == 2.2.3
+matplotlib == 3.10.3
+numpy == 2.2.6
+openpyxl == 3.1.5
+requests == 2.32.3
+pyarrow == 20.0.0
+lxml == 5.4.0
+altair == 5.5.0
+vegafusion == 2.0.2
+docxtpl == 0.20.0

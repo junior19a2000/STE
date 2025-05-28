@@ -1,12 +1,13 @@
 import marimo
 
 __generated_with = "0.13.8"
-app = marimo.App(width="full", app_title="OSINERGMIN")
+app = marimo.App(width="full")
 
 
 @app.cell(hide_code=True)
 def _():
     import marimo as mo
+    import zipfile
     import requests
     import numpy as np
     import pandas as pd
@@ -16,7 +17,23 @@ def _():
     from io import BytesIO
     from datetime import datetime
     from datetime import date
-    return BytesIO, alt, datetime, io, mo, pd, re, requests
+    from docxtpl import DocxTemplate, InlineImage
+    from docx.shared import Cm 
+    return (
+        BytesIO,
+        Cm,
+        DocxTemplate,
+        InlineImage,
+        alt,
+        datetime,
+        io,
+        mo,
+        np,
+        pd,
+        re,
+        requests,
+        zipfile,
+    )
 
 
 @app.cell(hide_code=True)
@@ -141,29 +158,38 @@ def _():
     }
     months = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
     ]
+    group = ["LIMA E ICA", "AREQUIPA, TACNA Y MOQUEGUA", "CUSCO, PUNO, MADRE DE DIOS Y APURIMAC", "JUNIN, AYACUCHO, HUANCAVELICA, HUANUCO, PASCO Y UCAYALI", "LA LIBERTAD, ANCASH, CAJAMARCA, SAN MARTIN, AMAZONAS Y LORETO", "LAMBAYEQUE, PIURA Y TUMBES", "LORETO"]
+    teams = ["Lima e Ica", "Arequipa, Tacna y Moquegua", "Cusco, Puno, Madre de Dios y Apurimac", "Junín, Ayacucho, Huancavelica, Huánuco, Pasco y Ucayali", "La Libertad, Ancash, Cajamarca, San Martín, Amazonas y Loreto", "Lambayeque, Piura y Tumbes", "Loreto"]
     return (
         departamentos_region,
         distritos_region,
         fechas_limite,
+        group,
         months,
         provincias_region,
+        teams,
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     BytesIO,
+    Cm,
+    DocxTemplate,
+    InlineImage,
     alt,
     datetime,
     departamentos_region,
     distritos_region,
     fechas_limite,
+    io,
     mo,
     months,
     pd,
     provincias_region,
     re,
     requests,
+    zipfile,
 ):
     class Texto:
         def __init__(self, text, size, align, kind):
@@ -514,8 +540,64 @@ def _(
             return "050 - ESTACION DE SERVICIOS / GRIFOS"
         else:
             return "REVISAR"
+
+    def generatedocs(region, lugar, regiones, mes, anio, cronograma, datos_or, telefono, jor, cargo, result, matrix):
+        with mo.status.spinner(title = 'Filtrando agentes', subtitle = 'espere ...', remove_on_exit = True) as _spinner:
+            _codes = result[(result["OFICINA REGIONAL"] == region.value) & ((result["PRUEBAS DE HERMETICIDAD"] == 0) & (result["REGISTRO DE INFORMACION"] == 0))]["CODIGO OSINERGMIN"]
+            _data_filter = matrix[matrix["CODIGO OSINERGMIN"].isin(_codes)].reset_index(drop = True)
+            _data_filter = _data_filter[["CODIGO OSINERGMIN", "REGISTRO", "RUC", "RAZON SOCIAL", "DEPARTAMENTO", "PROVINCIA", "DISTRITO", "DIRECCION OPERATIVA", "OFICINA REGIONAL", "ACTIVIDAD"]].drop_duplicates(subset = ["CODIGO OSINERGMIN"], ignore_index = True)
+
+        buffer_zip = io.BytesIO()
+        with zipfile.ZipFile(buffer_zip, mode = "w", compression = zipfile.ZIP_DEFLATED) as zipf:
+
+            with mo.status.progress_bar(total = _data_filter.shape[0], title = "Generando oficio", completion_title = "Oficios generados", completion_subtitle = str(_data_filter.shape[0]) + " en total", remove_on_exit = True) as bar:
+                for _, _row in _data_filter.iterrows():
+                    razon_social = _row["RAZON SOCIAL"]
+                    direccion = _row["DIRECCION OPERATIVA"]
+                    registro = _row["REGISTRO"]
+                    distrito = _row["DISTRITO"]
+                    provincia = _row["PROVINCIA"]
+                    departamento = _row["DEPARTAMENTO"]
+                    codigo = _row["CODIGO OSINERGMIN"]
+
+                    _document = DocxTemplate("PLANTILLA.docx")
+                    _context = {
+                        "LUGAR": lugar.value,
+                        "RAZON_SOCIAL": razon_social,
+                        "DIRECCION": direccion,
+                        "REGIONES": regiones,
+                        "MES": mes,
+                        "ANIO": anio,
+                        "CRONOGRAMA": InlineImage(_document, cronograma, width=Cm(15.5)),
+                        "REGISTRO": registro,
+                        "DISTRITO": distrito,
+                        "PROVINCIA": provincia,
+                        "DEPARTAMENTO": departamento,
+                        "DATOS_OR": datos_or,
+                        "TELEFONO": telefono.value,
+                        "JOR": jor.value,
+                        "CARGO": cargo.value,
+                    }
+                    _document.render(_context)               
+                    file_stream = io.BytesIO()
+                    _document.save(file_stream)
+                    file_stream.seek(0)
+                    zipf.writestr(f"{codigo}.docx", file_stream.read())
+
+                    bar.update(subtitle = "codigo: " + str(codigo))
+
+        with mo.status.spinner(title = 'Generando ZIP', subtitle = 'espere ...', remove_on_exit = True) as _spinner:
+            buffer_zip.seek(0)
+            zip_download = mo.download(
+                data = buffer_zip.read(),
+                filename = "OFICIOS_" + region.value + ".zip",
+                mimetype = "application/zip",
+                label = "DESCARGAR OFICIOS A EMITIR"
+            )
+            return mo.output.replace(zip_download)
     return (
         Texto,
+        generatedocs,
         load_matrix,
         load_tanksdata,
         load_testsdata,
@@ -528,7 +610,7 @@ def _(
 
 @app.cell
 def _(Texto, mo):
-    _texto = "Hermeticidad de tanques de CL y OPDH a nivel nacional"
+    _texto = "HERMETICIDAD DE TANQUES DE CL y OPDH A NIVEL NACIONAL"
     mo.output.append(Texto(_texto, 36, "center", "bold").create())
     _texto = "** aplica solo para tanques ubicados en estaciones de servicios **"
     mo.output.append(Texto(_texto, 16, "center", "bold").create())
@@ -541,7 +623,7 @@ def _(Texto, mo):
         width = "100%",
     ))
     mo.output.append(mo.md("<br>"))
-    _texto = "Matriz general de datos actualizada"
+    _texto = "MATRIZ GENERAL DE DATOS ACTUALIZADA"
     download_2 = mo.ui.switch(label = "Exportar matriz general de datos")
     mo.output.append(mo.hstack([Texto(_texto, 26, "left", "bold").create(), download_2], justify = "space-between", align = "stretch"))
     return (download_2,)
@@ -625,6 +707,99 @@ def _(Texto, mo, pd, plot_bars, result):
 
 
 @app.cell
+def _(Texto, alt, intervalos, matriz, mo, pd):
+    mo.output.append(mo.md("<br>"))
+    _texto = "MAPAS DE CALOR PARA TANQUES HERMETICOS Y NO HERMETICOS A NIVEL NACIONAL"
+    mo.output.append(Texto(_texto, 26, "left", "bold").create())
+
+    _data = matriz[[
+        "CODIGO OSINERGMIN", 
+        "TANQUE",
+        "CAPACIDAD (GLN)",
+        "RESULTADO DE COMPARTIMIENTO", 
+        "EDAD DEL TANQUE"
+    ]].copy().reset_index(drop = True)
+    _data = _data[
+        _data["RESULTADO DE COMPARTIMIENTO"].notna() & 
+        (_data["RESULTADO DE COMPARTIMIENTO"].str.strip() != "") &
+        _data["EDAD DEL TANQUE"].notna() & 
+        (_data["EDAD DEL TANQUE"].str.strip() != "") &
+        (_data["EDAD DEL TANQUE"] != "NO APLICA")
+    ].reset_index(drop = True)
+    _datos = []
+    _codes = _data["CODIGO OSINERGMIN"].unique()
+    for _i in _codes:
+        _data_code = _data[_data["CODIGO OSINERGMIN"] == _i]
+        _tanks = _data_code["TANQUE"].unique()
+        for _j in _tanks:
+            _data_tank = _data_code[_data_code["TANQUE"] == _j]
+            if (_data_tank['RESULTADO DE COMPARTIMIENTO'] == 'SIN FUGA').all():
+                _result = "HERMETICO"
+            else:
+                _result = "NO HERMETICO"
+            _datos.append(list(_data_tank.values[0]) + [_result, _data_tank["CAPACIDAD (GLN)"].sum()])
+    _datos = pd.DataFrame(_datos, columns = [
+        "CODIGO OSINERGMIN",  
+        "TANQUE",
+        "CAPACIDAD (GLN)",
+        "RESULTADO DE COMPARTIMIENTO", 
+        "EDAD DEL TANQUE",
+        "RESULTADO",
+        "CAPACIDAD DEL TANQUE (GLN)"
+    ]).drop(columns = ["CODIGO OSINERGMIN", "TANQUE", "CAPACIDAD (GLN)", "RESULTADO DE COMPARTIMIENTO"])
+
+    _nohermeticos = _datos[(_datos["EDAD DEL TANQUE"] < 100) & (_datos["RESULTADO"] == "NO HERMETICO")].drop(columns = ["RESULTADO"])
+    _nohermeticos["RANGO_EDAD"] = pd.cut(_nohermeticos["EDAD DEL TANQUE"], bins = intervalos(_nohermeticos["EDAD DEL TANQUE"].max()))
+    _nohermeticos["RANGO_CAPACIDAD"] = pd.cut(_nohermeticos["CAPACIDAD DEL TANQUE (GLN)"], bins = intervalos(_nohermeticos["CAPACIDAD DEL TANQUE (GLN)"].max()))
+    _nohermeticos = _nohermeticos.groupby(["RANGO_EDAD", "RANGO_CAPACIDAD"], observed = False).size().reset_index(name = "CANTIDAD")
+
+    _orden_edad = _nohermeticos["RANGO_EDAD"].cat.categories.astype(str).tolist()
+    _orden_capacidad = _nohermeticos["RANGO_CAPACIDAD"].cat.categories.astype(str).tolist()
+    _nohermeticos["RANGO_EDAD"] = _nohermeticos["RANGO_EDAD"].astype(str)
+    _nohermeticos["RANGO_CAPACIDAD"] = _nohermeticos["RANGO_CAPACIDAD"].astype(str)
+
+    _heatmap_nh = alt.Chart(_nohermeticos).mark_rect().encode(
+        x=alt.X("RANGO_EDAD:N", title="EDAD DEL TANQUE (AÑOS)", sort=_orden_edad),
+        y=alt.Y("RANGO_CAPACIDAD:N", title="CAPACIDAD DEL TANQUE (GALONES)", sort=_orden_capacidad[::-1]),
+        color=alt.Color("CANTIDAD:Q", scale=alt.Scale(scheme="reds"), title="CANTIDAD"),
+        tooltip=["RANGO_EDAD", "RANGO_CAPACIDAD", "CANTIDAD"]
+    ).properties(
+        title="MAPA DE CALOR PARA TANQUES NO HERMETICOS"
+    )
+
+    _hermeticos = _datos[(_datos["EDAD DEL TANQUE"] < 100) & (_datos["RESULTADO"] == "HERMETICO")].drop(columns = ["RESULTADO"])
+    _hermeticos["RANGO_EDAD"] = pd.cut(_hermeticos["EDAD DEL TANQUE"], bins = intervalos(_hermeticos["EDAD DEL TANQUE"].max()))
+    _hermeticos["RANGO_CAPACIDAD"] = pd.cut(_hermeticos["CAPACIDAD DEL TANQUE (GLN)"], bins = intervalos(_hermeticos["CAPACIDAD DEL TANQUE (GLN)"].max()))
+    _hermeticos = _hermeticos.groupby(["RANGO_EDAD", "RANGO_CAPACIDAD"], observed = False).size().reset_index(name = "CANTIDAD")
+
+    _orden_edad = _hermeticos["RANGO_EDAD"].cat.categories.astype(str).tolist()
+    _orden_capacidad = _hermeticos["RANGO_CAPACIDAD"].cat.categories.astype(str).tolist()
+    _hermeticos["RANGO_EDAD"] = _hermeticos["RANGO_EDAD"].astype(str)
+    _hermeticos["RANGO_CAPACIDAD"] = _hermeticos["RANGO_CAPACIDAD"].astype(str)
+
+    _heatmap_sh = alt.Chart(_hermeticos).mark_rect().encode(
+        x=alt.X("RANGO_EDAD:N", title="EDAD DEL TANQUE (AÑOS)", sort=_orden_edad),
+        y=alt.Y("RANGO_CAPACIDAD:N", title="CAPACIDAD DEL TANQUE (GALONES)", sort=_orden_capacidad[::-1]),
+        color=alt.Color("CANTIDAD:Q", scale=alt.Scale(scheme="blues"), title="CANTIDAD"),
+        tooltip=["RANGO_EDAD", "RANGO_CAPACIDAD", "CANTIDAD"]
+    ).properties(
+        title="MAPA DE CALOR PARA TANQUES HERMETICOS"
+    )
+    mo.output.append(mo.hstack([mo.ui.altair_chart(_heatmap_sh), mo.ui.altair_chart(_heatmap_nh)], justify = "space-between", align = "center", widths = [1, 1]))
+    return
+
+
+@app.cell
+def _(np):
+    def intervalos(_number):
+        _values = np.arange(0, np.ceil(_number), np.ceil(np.ceil(_number) / 11))
+        if _values[-1] < _number:
+            _values = np.concatenate((_values, np.array([_values[-1] + np.ceil(np.ceil(_number) / 11)])))
+        return _values
+    return (intervalos,)
+
+
+@app.cell
 def _(Texto, mo):
     mo.output.append(mo.md("<br>"))
     _texto = "ANALISIS REGIONAL"
@@ -650,7 +825,7 @@ def _(fechas_limite, matriz, mo, outofdate, regiones_outofdate, result):
                             label = "ESTADO: ",
                             full_width = True)
     matrix = matriz[matriz["OFICINA REGIONAL"].isin(regiones_outofdate(fechas_limite))].copy() if outofdate.value else matriz.copy()
-    mo.output.append(mo.hstack([region, analisis, estado], widths = [1, 1, 1, 1], gap = 2))
+    mo.output.append(mo.hstack([region, analisis, estado], widths = [1, 1, 1, 1], gap = 2, justify = "space-between", align = "center"))
     return analisis, estado, matrix, region
 
 
@@ -683,11 +858,83 @@ def _(
             _buffer.seek(0)
             _excel_download = mo.download(
                 data = _buffer.read(),
-                filename = region.value + "_" + analisis.value + "_" + estado.value + ".xlsx",
+                filename = region.value + "_" + analisis.value + "_" + str(estado.value) + ".xlsx",
                 mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 label = "Descargar Excel"
             )
             mo.output.append(_excel_download)
+    return
+
+
+@app.cell
+def _(Texto, fechas_limite, group, mo, months, region, teams):
+    mo.output.append(mo.md("<br>"))
+    _texto = "OFICIOS REGIONALES"
+    mo.output.append(Texto(_texto, 26, "left", "bold").create())
+    _texto = "Edite los siguientes parametros para generar los oficios correspondientes a aquellos agentes que no han acreditado el registro de informacion y prueba de hermeticidad alguna, y que son competencia de la oficina regional previamente seleccionada:"
+    mo.output.append(Texto(_texto, 16, "justify", "normal").create())
+
+    lugar = mo.ui.text(label = "LUGAR: ", full_width = True, placeholder = "Miraflores")
+
+    for _i in range(len(group)):
+        if region.value.split(" ")[0] in group[_i]:
+            regiones = teams[_i]
+            break
+
+    _, mes, anio = fechas_limite.get(region.value).split("/")
+    mes = months[int(mes) - 1].lower()
+
+    cronograma = "GRUPOS/G" + str(_i + 1) + ".png"
+
+    datos_or = "Oficina Regional de " + region.value.title()
+
+    telefono = mo.ui.text(label = "TELEFONO: ", full_width = True, placeholder = "123456789")
+
+    jor = mo.ui.text(label = "FIRMANTE: ", full_width = True, placeholder = "Nombres y apellidos")
+
+    cargo = mo.ui.text(label = "PUESTO: ", full_width = True, placeholder = "Jefe de oficina regional")
+
+    mo.output.append(mo.hstack([lugar, telefono, jor, cargo], widths = [1, 1, 1, 1], gap = 2, justify = "space-between", align = "end"))
+    return (
+        anio,
+        cargo,
+        cronograma,
+        datos_or,
+        jor,
+        lugar,
+        mes,
+        regiones,
+        telefono,
+    )
+
+
+@app.cell
+def _(
+    anio,
+    cargo,
+    cronograma,
+    datos_or,
+    generatedocs,
+    jor,
+    lugar,
+    matrix,
+    mes,
+    mo,
+    region,
+    regiones,
+    result,
+    telefono,
+):
+    button_1 = mo.ui.run_button(label = f"{mo.icon('eos-icons:rotating-gear', size = 15, color = "black")} GENERAR OFICIOS A EMITIR", full_width = True, on_change = lambda _: generatedocs(region, lugar, regiones, mes, anio, cronograma, datos_or, telefono, jor, cargo, result, matrix), kind = "danger")
+    return (button_1,)
+
+
+@app.cell
+def _(button_1, mo):
+    if button_1.value:
+        mo.output.clear()
+    else:
+        mo.output.replace(button_1)
     return
 
 
@@ -728,8 +975,8 @@ def _(alt, matrix, matriz, mo, optional_1, outofdate, pd, region):
     for _i in _codes:
         _data_code = _data[_data["CODIGO OSINERGMIN"] == _i]
         _tanks = _data_code["TANQUE"].unique()
-        for j in _tanks:
-            _data_tank = _data_code[_data_code["TANQUE"] == j]
+        for _j in _tanks:
+            _data_tank = _data_code[_data_code["TANQUE"] == _j]
             if (_data_tank['RESULTADO DE COMPARTIMIENTO'] == 'SIN FUGA').all():
                 _result = "HERMETICO"
             else:
@@ -774,34 +1021,12 @@ def _(alt, matrix, matriz, mo, optional_1, outofdate, pd, region):
         color='independent'
     ).properties(
         title={
-            "text":"RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION A SU HERMETICIDAD",
+            "text":"RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION DE SU HERMETICIDAD",
             "subtitle": _regiones,
             "subtitleFontSize": 5,
         },
     )
     mo.output.append(mo.ui.altair_chart(_chart))
-
-    # _chart = alt.Chart(_datos).mark_circle(size = 50, stroke='black', strokeWidth=0.5).encode(
-    #     x=alt.X("EDAD DEL TANQUE:Q", title="AÑOS DE ANTIGUEDAD DEL TANQUE"),
-    #     y=alt.Y("CAPACIDAD DEL TANQUE (GLN):Q", title="CAPACIDAD DEL TANQUE (GLN)"),
-    #     color=alt.Color("RESULTADO:N", title="RESULTADO",
-    #                        scale=alt.Scale(
-    #                             domain=["NO HERMETICO", "HERMETICO"],
-    #                             range=["red", "blue"]
-    #                        )
-    #                    ),
-    #     tooltip=[
-    #         "CODIGO OSINERGMIN",
-    #         "TANQUE",
-    #         "CAPACIDAD DEL TANQUE (GLN)",
-    #         "EDAD DEL TANQUE",
-    #         "RESULTADO"
-    #     ]
-    # ).properties(
-    #     title="RELACION ENTRE LOS AÑOS DE ANTIGUEDAD DEL TANQUE Y SU CAPACIDAD TOTAL, EN FUNCION A SU HERMETICIDAD",
-    # )
-    # correlacional_graph = mo.ui.altair_chart(_chart)
-    # mo.output.append(correlacional_graph)
     return
 
 
@@ -811,7 +1036,7 @@ def _(Texto, matrix, mo):
     download_3 = mo.ui.switch(label = "Exportar analisis")
     _texto = "ANALISIS CRÍTICO"
     mo.output.append(mo.hstack([Texto(_texto, 26, "left", "bold").create(), download_3], justify = "space-between", align = "stretch"))
-    _texto = "En la gráfica, seleccione la barra correspondiente a la región competente que desea analizar:"
+    _texto = "En la gráfica, seleccione la barra correspondiente a la región competente que desea analizar, con el fin de verificar la cantidad de tanques no hermeticos con los que cuenta dicha región:"
     mo.output.append(Texto(_texto, 16, "justify", "normal").create())
     danger_data = matrix[
         ((matrix["RESULTADO DE COMPARTIMIENTO"] == "CON FUGA") | 
